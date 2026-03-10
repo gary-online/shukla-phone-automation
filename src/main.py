@@ -1,0 +1,73 @@
+import logging
+from urllib.parse import urlparse
+
+from fastapi import FastAPI, Request, Response
+from twilio.twiml.voice_response import VoiceResponse
+
+from src.config import BASE_URL, HOST, PORT
+from src.websocket_handler import handle_conversation_relay
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Shukla Surgical Support - AI Phone Service")
+
+
+@app.get("/health")
+async def health():
+    from datetime import datetime, timezone
+
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.post("/voice/incoming")
+async def voice_incoming(request: Request):
+    """Twilio webhook for incoming voice calls.
+
+    Returns TwiML that connects the call to ConversationRelay via WebSocket.
+    """
+    twiml = VoiceResponse()
+    connect = twiml.connect()
+
+    ws_host = urlparse(BASE_URL).hostname
+    connect.conversation_relay(
+        url=f"wss://{ws_host}/ws/conversation",
+        voice="Google.en-US-Journey-F",
+        transcription_provider="google",
+        tts_provider="google",
+        language="en-US",
+    )
+
+    logger.info("Incoming call — returned ConversationRelay TwiML")
+    return Response(content=str(twiml), media_type="text/xml")
+
+
+@app.websocket("/ws/conversation")
+async def ws_conversation(ws):
+    """WebSocket endpoint for Twilio ConversationRelay."""
+    await handle_conversation_relay(ws)
+
+
+@app.post("/voice/status")
+async def voice_status(request: Request):
+    """Twilio webhook for call status callbacks (optional, for logging)."""
+    body = await request.form()
+    logger.info(
+        "Call status update: call_sid=%s status=%s duration=%s",
+        body.get("CallSid"),
+        body.get("CallStatus"),
+        body.get("CallDuration"),
+    )
+    return {"received": True}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    logger.info("Starting server on %s:%s", HOST, PORT)
+    logger.info("Voice webhook: %s/voice/incoming", BASE_URL)
+    logger.info("WebSocket endpoint: %s/ws/conversation", BASE_URL)
+    uvicorn.run(app, host=HOST, port=PORT)
