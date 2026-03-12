@@ -20,8 +20,9 @@ TWILIO_ACCOUNT_SID = _require("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = _require("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = _require("TWILIO_PHONE_NUMBER")
 
-# Anthropic
+# Anthropic / OpenRouter
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
+ANTHROPIC_BASE_URL = _optional("ANTHROPIC_BASE_URL")
 CLAUDE_MODEL = _optional("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 
 # Google Chat

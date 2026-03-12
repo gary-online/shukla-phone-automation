@@ -3,13 +3,16 @@ from dataclasses import dataclass
 
 import anthropic
 
-from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from src.config import ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_MODEL
 from src.system_prompt import SYSTEM_PROMPT
 from src.types import CallRecordExtract, Priority, RequestType
 
 logger = logging.getLogger(__name__)
 
-client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+client = anthropic.AsyncAnthropic(
+    api_key=ANTHROPIC_API_KEY,
+    **({"base_url": ANTHROPIC_BASE_URL} if ANTHROPIC_BASE_URL else {}),
+)
 
 SUBMIT_TOOL: anthropic.types.ToolParam = {
     "name": "submit_call_record",
