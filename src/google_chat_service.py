@@ -38,18 +38,22 @@ async def send_google_chat_notification(record: CallRecord) -> None:
         ]
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            GOOGLE_CHAT_WEBHOOK_URL,
-            json=card,
-            headers={"Content-Type": "application/json"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(
+                GOOGLE_CHAT_WEBHOOK_URL,
+                json=card,
+                headers={"Content-Type": "application/json"},
+            )
 
-    if response.status_code >= 400:
-        logger.error(
-            "Failed to send Google Chat notification: %s %s",
-            response.status_code,
-            response.text,
-        )
-    else:
-        logger.info("Google Chat notification sent (call_sid=%s)", record.call_sid)
+        if response.status_code >= 400:
+            logger.error(
+                "Failed to send Google Chat notification: %s %s",
+                response.status_code,
+                response.text,
+            )
+        else:
+            logger.info("Google Chat notification sent (call_sid=%s)", record.call_sid)
+    except httpx.HTTPError as e:
+        logger.error("Google Chat HTTP error (call_sid=%s): %s", record.call_sid, e)
+        raise
