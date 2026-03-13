@@ -88,18 +88,18 @@ class ClaudeResponse:
     done: bool
 
 
-async def stream_claude_response(
+async def get_claude_response(
     conversation_history: list[ConversationTurn],
-) -> AsyncGenerator[str | CallRecordExtract, None]:
-    """Stream Claude's response, yielding text chunks and optionally a CallRecordExtract.
+) -> ClaudeResponse:
+    """Get Claude's response using streaming for faster time-to-completion.
 
-    Yields str chunks as they arrive (sentence by sentence for natural TTS).
-    If Claude uses the submit tool, yields a CallRecordExtract at the end.
+    Returns the full response text and optional call record.
+    Uses streaming internally but collects the full response before returning,
+    so TTS gets a complete utterance without fragmentation issues.
     """
     messages = [{"role": t.role, "content": t.content} for t in conversation_history]
 
     full_text = ""
-    buffer = ""
     tool_name = ""
     tool_id = ""
     tool_input_json = ""
@@ -118,20 +118,12 @@ async def stream_claude_response(
                     tool_id = event.content_block.id
             elif event.type == "content_block_delta":
                 if event.delta.type == "text_delta":
-                    buffer += event.delta.text
                     full_text += event.delta.text
-
-                    # Yield at sentence boundaries for natural TTS pacing
-                    while _has_sentence_break(buffer):
-                        sentence, buffer = _split_at_sentence(buffer)
-                        if sentence.strip():
-                            yield sentence
                 elif event.delta.type == "input_json_delta":
                     tool_input_json += event.delta.partial_json
 
-    # Flush any remaining text in the buffer
-    if buffer.strip():
-        yield buffer
+    call_record = None
+    done = False
 
     # Handle tool use (submit_call_record)
     if tool_name == "submit_call_record" and tool_input_json:
@@ -146,15 +138,14 @@ async def stream_claude_response(
             details=inp.get("details", ""),
             priority=Priority(inp.get("priority", "normal")),
         )
+        done = True
         logger.info("Claude submitted call record via tool use: %s", call_record)
 
         # Get closing message after tool use
         messages.append({"role": "assistant", "content": [
-            {"type": "text", "text": full_text} if full_text else None,
+            *([{"type": "text", "text": full_text}] if full_text else []),
             {"type": "tool_use", "id": tool_id, "name": tool_name, "input": inp},
         ]})
-        # Remove None entries
-        messages[-1]["content"] = [b for b in messages[-1]["content"] if b is not None]
 
         messages.append({
             "role": "user",
@@ -174,32 +165,6 @@ async def stream_claude_response(
         ) as follow_stream:
             async for event in follow_stream:
                 if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                    buffer += event.delta.text
-                    while _has_sentence_break(buffer):
-                        sentence, buffer = _split_at_sentence(buffer)
-                        if sentence.strip():
-                            yield sentence
+                    full_text += event.delta.text
 
-        if buffer.strip():
-            yield buffer
-
-        yield call_record
-
-
-def _has_sentence_break(text: str) -> bool:
-    """Check if text contains a sentence-ending boundary."""
-    for char in ".!?":
-        idx = text.find(char)
-        if idx != -1 and idx < len(text) - 1:
-            return True
-    return False
-
-
-def _split_at_sentence(text: str) -> tuple[str, str]:
-    """Split text at the first sentence boundary."""
-    best = len(text)
-    for char in ".!?":
-        idx = text.find(char)
-        if idx != -1 and idx + 1 < best:
-            best = idx + 1
-    return text[:best], text[best:]
+    return ClaudeResponse(text=full_text, call_record=call_record, done=done)
