@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import signal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, Response, WebSocket
@@ -16,6 +18,30 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Shukla Surgical Support - AI Phone Service")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Initialized in on_startup when the event loop is running
+_shutdown_event: asyncio.Event | None = None
+
+
+@app.on_event("startup")
+async def on_startup():
+    global _shutdown_event
+    _shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda: _shutdown_event.set())
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    logger.info("Shutdown initiated, waiting for %d active calls...", len(active_sessions))
+    for _ in range(30):
+        if not active_sessions:
+            break
+        await asyncio.sleep(1)
+    if active_sessions:
+        logger.warning("Force-closing %d remaining sessions", len(active_sessions))
+    logger.info("Shutdown complete")
 
 
 @app.get("/health")
@@ -42,6 +68,12 @@ async def health_live():
 
 @app.get("/health/ready")
 async def health_ready():
+    if _shutdown_event and _shutdown_event.is_set():
+        return Response(
+            content='{"status": "shutting down"}',
+            status_code=503,
+            media_type="application/json",
+        )
     claude = await check_claude_api()
     if claude["status"] != "ok":
         return Response(
