@@ -30,11 +30,20 @@ async def process_completed_call(
         tray_type=extract.tray_type,
         surgeon=extract.surgeon,
         facility=extract.facility,
+        facility_address=extract.facility_address,
+        customer_id=extract.customer_id,
+        tray_details=extract.tray_details,
         surgery_date=extract.surgery_date,
         details=extract.details,
         priority=extract.priority,
         routed_to=_get_routing_destination(extract.request_type),
         call_duration_seconds=call_duration_seconds,
+        case_number=extract.case_number,
+        sender_info=extract.sender_info,
+        recipient_info=extract.recipient_info,
+        shipping_priority=extract.shipping_priority,
+        shipment_weight=extract.shipment_weight,
+        return_label_needed=extract.return_label_needed,
     )
 
     logger.info("Processing completed call: call_sid=%s request_type=%s", call_sid, record.request_type)
@@ -55,4 +64,5 @@ async def process_completed_call(
 
 
 async def _append_csv_safe(record: CallRecord) -> None:
-    append_call_record(record)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, append_call_record, record)

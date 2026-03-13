@@ -15,14 +15,34 @@ async def send_google_chat_notification(record: CallRecord) -> None:
         return
 
     widgets = []
-    if record.tray_type:
-        widgets.append({"keyValue": {"topLabel": "Tray Type", "content": record.tray_type}})
-    if record.surgeon:
-        widgets.append({"keyValue": {"topLabel": "Surgeon", "content": record.surgeon}})
     if record.facility:
         widgets.append({"keyValue": {"topLabel": "Facility", "content": record.facility}})
+    if record.facility_address:
+        widgets.append({"keyValue": {"topLabel": "Facility Address", "content": record.facility_address}})
+    if record.customer_id:
+        widgets.append({"keyValue": {"topLabel": "Customer ID", "content": record.customer_id}})
+    if record.surgeon:
+        widgets.append({"keyValue": {"topLabel": "Surgeon", "content": record.surgeon}})
+    if record.tray_details:
+        widgets.append({"keyValue": {"topLabel": "Tray Details", "content": record.tray_details}})
+    elif record.tray_type:
+        widgets.append({"keyValue": {"topLabel": "Tray Type", "content": record.tray_type}})
     if record.surgery_date:
         widgets.append({"keyValue": {"topLabel": "Surgery Date", "content": record.surgery_date}})
+    # FedEx label fields
+    if record.case_number:
+        widgets.append({"keyValue": {"topLabel": "Case/Ref #", "content": record.case_number}})
+    if record.sender_info:
+        widgets.append({"keyValue": {"topLabel": "Sender", "content": record.sender_info}})
+    if record.recipient_info:
+        widgets.append({"keyValue": {"topLabel": "Recipient", "content": record.recipient_info}})
+    if record.shipping_priority:
+        widgets.append({"keyValue": {"topLabel": "Shipping", "content": record.shipping_priority}})
+    if record.shipment_weight:
+        widgets.append({"keyValue": {"topLabel": "Weight", "content": record.shipment_weight}})
+    if record.return_label_needed:
+        widgets.append({"keyValue": {"topLabel": "Return Label", "content": "Yes"}})
+
     widgets.append({"keyValue": {"topLabel": "Priority", "content": str(record.priority).upper()}})
     if record.details:
         widgets.append({"textParagraph": {"text": f"<b>Details:</b> {record.details}"}})
@@ -48,13 +68,13 @@ async def send_google_chat_notification(record: CallRecord) -> None:
             )
 
         if response.status_code >= 400:
-            logger.error(
-                "Failed to send Google Chat notification: %s %s",
-                response.status_code,
-                response.text,
+            raise httpx.HTTPStatusError(
+                f"Google Chat returned {response.status_code}",
+                request=response.request,
+                response=response,
             )
-        else:
-            logger.info("Google Chat notification sent (call_sid=%s)", record.call_sid)
+
+        logger.info("Google Chat notification sent (call_sid=%s)", record.call_sid)
 
     try:
         await with_retry(_post_chat, max_attempts=3, base_delay=1.0)

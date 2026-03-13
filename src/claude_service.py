@@ -1,6 +1,5 @@
 import json
 import logging
-from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 import anthropic
@@ -38,21 +37,48 @@ SUBMIT_TOOL: anthropic.types.ToolParam = {
                 "enum": [rt.value for rt in RequestType],
                 "description": "Type of request",
             },
-            "tray_type": {
-                "type": "string",
-                "description": "Tray type from the catalog, or empty string if not applicable",
-            },
             "surgeon": {
                 "type": "string",
                 "description": "Surgeon/doctor name, or empty string if not applicable",
             },
             "facility": {
                 "type": "string",
-                "description": "Facility/hospital name, or empty string if not applicable",
+                "description": "Facility/hospital name",
+            },
+            "facility_address": {
+                "type": "string",
+                "description": "Facility/hospital address (street, city, state, zip)",
+            },
+            "customer_id": {
+                "type": "string",
+                "description": "Customer ID if provided, or empty string",
+            },
+            "trays": {
+                "type": "array",
+                "description": "List of trays involved in this request",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tray_type": {
+                            "type": "string",
+                            "description": "Tray type name from the catalog",
+                        },
+                        "price": {
+                            "type": "string",
+                            "description": "Price of the tray, e.g. '$500'",
+                        },
+                        "source": {
+                            "type": "string",
+                            "enum": ["consignment", "headquarters", ""],
+                            "description": "Whether this tray is a consignment set (already with rep) or being requested from headquarters",
+                        },
+                    },
+                    "required": ["tray_type"],
+                },
             },
             "surgery_date": {
                 "type": "string",
-                "description": "Surgery date in YYYY-MM-DD format, or empty string if not applicable",
+                "description": "Surgery date in YYYY-MM-DD format, or empty string",
             },
             "details": {
                 "type": "string",
@@ -63,17 +89,65 @@ SUBMIT_TOOL: anthropic.types.ToolParam = {
                 "enum": [p.value for p in Priority],
                 "description": "Priority level — urgent only if caller explicitly says so",
             },
+            "case_number": {
+                "type": "string",
+                "description": "Case or reference number (for FedEx label requests)",
+            },
+            "sender_name": {
+                "type": "string",
+                "description": "Sender name (for FedEx label requests)",
+            },
+            "sender_company": {
+                "type": "string",
+                "description": "Sender company (for FedEx label requests)",
+            },
+            "sender_address": {
+                "type": "string",
+                "description": "Sender full address (for FedEx label requests)",
+            },
+            "sender_phone": {
+                "type": "string",
+                "description": "Sender phone number (for FedEx label requests)",
+            },
+            "sender_email": {
+                "type": "string",
+                "description": "Sender email (for FedEx label requests)",
+            },
+            "shipping_priority": {
+                "type": "string",
+                "enum": ["overnight", "second day", "ground", ""],
+                "description": "Shipping priority (for FedEx label requests)",
+            },
+            "recipient_name": {
+                "type": "string",
+                "description": "Recipient name (for FedEx label requests)",
+            },
+            "recipient_company": {
+                "type": "string",
+                "description": "Recipient company (for FedEx label requests)",
+            },
+            "recipient_address": {
+                "type": "string",
+                "description": "Recipient full address (for FedEx label requests)",
+            },
+            "recipient_phone": {
+                "type": "string",
+                "description": "Recipient phone number (for FedEx label requests)",
+            },
+            "recipient_email": {
+                "type": "string",
+                "description": "Recipient email (for FedEx label requests)",
+            },
+            "shipment_weight": {
+                "type": "string",
+                "description": "Weight of the shipment (for FedEx label requests)",
+            },
+            "return_label_needed": {
+                "type": "boolean",
+                "description": "Whether a return label is needed (for FedEx label requests)",
+            },
         },
-        "required": [
-            "rep_name",
-            "request_type",
-            "tray_type",
-            "surgeon",
-            "facility",
-            "surgery_date",
-            "details",
-            "priority",
-        ],
+        "required": ["rep_name", "request_type"],
     },
 }
 
@@ -111,6 +185,41 @@ class ClaudeResponse:
     call_record: CallRecordExtract | None
     done: bool
     transfer_reason: str | None = None
+
+
+def _format_trays(trays: list[dict]) -> tuple[str, str]:
+    """Format trays list into tray_type summary and tray_details breakdown.
+
+    Returns (tray_type, tray_details) tuple.
+    """
+    if not trays:
+        return "", ""
+
+    names = []
+    details = []
+    for t in trays:
+        name = t.get("tray_type", "")
+        if not name:
+            continue
+        names.append(name)
+        parts = [name]
+        if t.get("price"):
+            parts.append(t["price"])
+        if t.get("source"):
+            parts.append(t["source"])
+        details.append(" — ".join(parts))
+
+    return ", ".join(names), "; ".join(details)
+
+
+def _format_contact(inp: dict, prefix: str) -> str:
+    """Format sender/recipient contact info into a single string."""
+    parts = []
+    for field in ["name", "company", "address", "phone", "email"]:
+        val = inp.get(f"{prefix}_{field}", "")
+        if val:
+            parts.append(val)
+    return ", ".join(parts)
 
 
 async def get_claude_response(
@@ -170,16 +279,33 @@ async def get_claude_response(
             logger.error("Empty rep_name in tool input")
             return ClaudeResponse(text=full_text, call_record=None, done=False)
 
+        # Format structured tray info
+        trays = inp.get("trays", [])
+        tray_type, tray_details = _format_trays(trays)
+
+        # Format sender/recipient info
+        sender_info = _format_contact(inp, "sender")
+        recipient_info = _format_contact(inp, "recipient")
+
         try:
             call_record = CallRecordExtract(
                 rep_name=inp.get("rep_name", ""),
                 request_type=RequestType(inp.get("request_type", "Other")),
-                tray_type=inp.get("tray_type", ""),
+                tray_type=tray_type,
                 surgeon=inp.get("surgeon", ""),
                 facility=inp.get("facility", ""),
+                facility_address=inp.get("facility_address", ""),
+                customer_id=inp.get("customer_id", ""),
+                tray_details=tray_details,
                 surgery_date=inp.get("surgery_date", ""),
                 details=inp.get("details", ""),
                 priority=Priority(inp.get("priority", "normal")),
+                case_number=inp.get("case_number", ""),
+                sender_info=sender_info,
+                recipient_info=recipient_info,
+                shipping_priority=inp.get("shipping_priority", ""),
+                shipment_weight=inp.get("shipment_weight", ""),
+                return_label_needed="yes" if inp.get("return_label_needed") else "",
             )
         except (ValueError, KeyError) as e:
             logger.error("Invalid tool input values: %s", e)
@@ -203,16 +329,21 @@ async def get_claude_response(
             }],
         })
 
-        async with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=200,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-        ) as follow_stream:
-            async for event in follow_stream:
-                if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                    full_text += event.delta.text
+        try:
+            async with client.messages.stream(
+                model=CLAUDE_MODEL,
+                max_tokens=200,
+                system=SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages,
+            ) as follow_stream:
+                async for event in follow_stream:
+                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        full_text += event.delta.text
+        except Exception as e:
+            logger.warning("Follow-up stream failed, using fallback: %s", e)
+            if not full_text:
+                full_text = "Got it, I've sent this to the team. Thank you for calling."
 
     elif tool_name == "transfer_to_human" and tool_input_json:
         try:
@@ -235,16 +366,21 @@ async def get_claude_response(
             }],
         })
 
-        async with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=100,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-        ) as follow_stream:
-            async for event in follow_stream:
-                if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                    full_text += event.delta.text
+        try:
+            async with client.messages.stream(
+                model=CLAUDE_MODEL,
+                max_tokens=100,
+                system=SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages,
+            ) as follow_stream:
+                async for event in follow_stream:
+                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        full_text += event.delta.text
+        except Exception as e:
+            logger.warning("Follow-up stream failed, using fallback: %s", e)
+            if not full_text:
+                full_text = "I'm going to have one of our team members follow up with you. Thank you for calling."
 
         return ClaudeResponse(text=full_text, call_record=None, done=True, transfer_reason=reason)
 

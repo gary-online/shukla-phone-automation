@@ -130,7 +130,7 @@ async def _handle_message(
         if not caller_speech:
             return
 
-        logger.info("Caller speech (call_sid=%s): %s", session.call_sid, caller_speech)
+        logger.debug("Caller speech (call_sid=%s): %s", session.call_sid, caller_speech)
 
         session.conversation_history.append(
             ConversationTurn(role="user", content=caller_speech)

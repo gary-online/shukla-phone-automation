@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import logging
+import threading
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -23,17 +24,26 @@ from src.types import CallRecord, Priority
 
 logger = logging.getLogger(__name__)
 
+# Cached Gmail service — avoids rebuilding credentials on every send
+_gmail_service = None
+_gmail_lock = threading.Lock()
+
 
 def _get_gmail_service():
-    creds = Credentials(
-        token=None,
-        refresh_token=GOOGLE_REFRESH_TOKEN,
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
-        token_uri="https://oauth2.googleapis.com/token",
-    )
-    creds.refresh(Request())
-    return build("gmail", "v1", credentials=creds)
+    global _gmail_service
+    with _gmail_lock:
+        if _gmail_service is not None:
+            return _gmail_service
+        creds = Credentials(
+            token=None,
+            refresh_token=GOOGLE_REFRESH_TOKEN,
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+        creds.refresh(Request())
+        _gmail_service = build("gmail", "v1", credentials=creds)
+        return _gmail_service
 
 
 def _build_email_body(record: CallRecord) -> str:
@@ -46,14 +56,35 @@ def _build_email_body(record: CallRecord) -> str:
         f"Request Type: {record.request_type}",
     ]
 
-    if record.tray_type:
-        lines.append(f"Tray Type: {record.tray_type}")
-    if record.surgeon:
-        lines.append(f"Surgeon: {record.surgeon}")
     if record.facility:
         lines.append(f"Facility: {record.facility}")
+    if record.facility_address:
+        lines.append(f"Facility Address: {record.facility_address}")
+    if record.customer_id:
+        lines.append(f"Customer ID: {record.customer_id}")
+    if record.surgeon:
+        lines.append(f"Surgeon: {record.surgeon}")
+    if record.tray_details:
+        lines.append(f"Tray Details: {record.tray_details}")
+    elif record.tray_type:
+        lines.append(f"Tray Type: {record.tray_type}")
     if record.surgery_date:
         lines.append(f"Surgery Date: {record.surgery_date}")
+
+    # FedEx label fields
+    if record.case_number:
+        lines.append(f"Case/Reference #: {record.case_number}")
+    if record.sender_info:
+        lines.append(f"Sender: {record.sender_info}")
+    if record.recipient_info:
+        lines.append(f"Recipient: {record.recipient_info}")
+    if record.shipping_priority:
+        lines.append(f"Shipping Priority: {record.shipping_priority}")
+    if record.shipment_weight:
+        lines.append(f"Shipment Weight: {record.shipment_weight}")
+    if record.return_label_needed:
+        lines.append(f"Return Label Needed: {record.return_label_needed}")
+
     if record.details:
         lines.extend(["", "Details:", record.details])
     lines.extend(["", f"Priority: {str(record.priority).upper()}", f"Call SID: {record.call_sid}"])
@@ -158,5 +189,8 @@ def _send_gmail_message(raw: str) -> None:
         service = _get_gmail_service()
         service.users().messages().send(userId="me", body={"raw": raw}).execute()
     except Exception as e:
+        # Invalidate cache on auth errors so next attempt rebuilds credentials
+        global _gmail_service
+        _gmail_service = None
         logger.error("Gmail API error: %s", e)
         raise

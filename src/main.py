@@ -1,13 +1,14 @@
 import asyncio
+import hmac
 import logging
 import signal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, Response, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
+from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
-from src.config import ADMIN_API_KEY, BASE_URL, HOST, PORT, ENV
+from src.config import ADMIN_API_KEY, BASE_URL, HOST, PORT, ENV, TWILIO_AUTH_TOKEN
 from src.error_history import get_recent_errors
 from src.health import active_sessions, check_claude_api, check_csv_dir, check_gmail
 from src.logging_config import setup_logging
@@ -17,7 +18,8 @@ setup_logging(ENV)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Shukla Surgical Support - AI Phone Service")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+_twilio_validator = RequestValidator(TWILIO_AUTH_TOKEN)
 
 # Initialized in on_startup when the event loop is running
 _shutdown_event: asyncio.Event | None = None
@@ -109,12 +111,24 @@ async def health_ready():
     return {"status": "ready"}
 
 
+async def _validate_twilio(request: Request) -> None:
+    """Validate that the request comes from Twilio using signature verification."""
+    signature = request.headers.get("X-Twilio-Signature", "")
+    url = str(request.url)
+    body = dict(await request.form())
+    if not _twilio_validator.validate(url, body, signature):
+        logger.warning("Invalid Twilio signature for %s", url)
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+
 @app.post("/voice/incoming")
 async def voice_incoming(request: Request):
     """Twilio webhook for incoming voice calls.
 
     Returns TwiML that connects the call to ConversationRelay via WebSocket.
     """
+    await _validate_twilio(request)
+
     twiml = VoiceResponse()
     connect = twiml.connect()
 
@@ -142,7 +156,7 @@ async def errors(request: Request):
     if not ADMIN_API_KEY:
         return Response(status_code=404)
     api_key = request.headers.get("X-API-Key", "")
-    if api_key != ADMIN_API_KEY:
+    if not hmac.compare_digest(api_key, ADMIN_API_KEY):
         return Response(status_code=401)
     return {"errors": get_recent_errors()}
 
@@ -150,6 +164,8 @@ async def errors(request: Request):
 @app.post("/voice/status")
 async def voice_status(request: Request):
     """Twilio webhook for call status callbacks (optional, for logging)."""
+    await _validate_twilio(request)
+
     body = await request.form()
     logger.info(
         "Call status update: call_sid=%s status=%s duration=%s",

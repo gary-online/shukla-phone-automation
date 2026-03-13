@@ -58,10 +58,29 @@ class TestCallRecordExtract:
         assert extract.surgery_date == ""
         assert extract.details == ""
         assert extract.priority == Priority.NORMAL
+        assert extract.facility_address == ""
+        assert extract.customer_id == ""
+        assert extract.tray_details == ""
+        assert extract.case_number == ""
+        assert extract.sender_info == ""
+        assert extract.recipient_info == ""
+        assert extract.shipping_priority == ""
 
     def test_missing_required_field_raises(self):
         with pytest.raises(ValidationError):
             CallRecordExtract(rep_name="John")  # missing request_type
+
+    def test_new_fields(self):
+        extract = CallRecordExtract(
+            rep_name="Gary",
+            request_type=RequestType.BILL_ONLY_REQUEST,
+            facility_address="123 Main St, Dallas TX",
+            customer_id="CUST-123",
+            tray_details="Mini — $500 — consignment",
+        )
+        assert extract.facility_address == "123 Main St, Dallas TX"
+        assert extract.customer_id == "CUST-123"
+        assert extract.tray_details == "Mini — $500 — consignment"
 
 
 class TestCallRecord:
@@ -86,6 +105,27 @@ class TestCallRecord:
         assert record.tray_type == ""
         assert record.priority == Priority.NORMAL
         assert record.call_duration_seconds == 0
+        assert record.facility_address == ""
+        assert record.customer_id == ""
+        assert record.tray_details == ""
+        assert record.case_number == ""
+
+    def test_fedex_fields(self):
+        record = CallRecord(
+            call_sid="CA123",
+            timestamp="2026-03-13T12:00:00Z",
+            rep_name="Gary",
+            request_type=RequestType.FEDEX_LABEL_REQUEST,
+            case_number="REF-999",
+            sender_info="John, Acme, 123 Main St",
+            recipient_info="Jane, Hospital, 456 Oak Ave",
+            shipping_priority="overnight",
+            shipment_weight="15 lbs",
+            return_label_needed="yes",
+        )
+        assert record.case_number == "REF-999"
+        assert record.shipping_priority == "overnight"
+        assert record.return_label_needed == "yes"
 
 
 class TestTrayCatalog:
