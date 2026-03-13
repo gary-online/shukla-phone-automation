@@ -22,6 +22,9 @@ class CallSession:
         self.should_close: bool = False
         self.last_assistant_response: str = ""
         self.escalation_sent: bool = False
+        self.turn_count: int = 0
+        self.claude_latencies: list[float] = []
+        self.request_type: str = ""
 
     def trim_history(self) -> None:
         """Keep first turn + last (MAX_HISTORY - 1) turns to stay within limits."""
@@ -69,9 +72,27 @@ async def handle_conversation_relay(ws: WebSocket) -> None:
             message = json.loads(data)
             await _handle_message(ws, session, message)
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected (call_sid=%s)", session.call_sid)
+        duration = int(time.time() - session.start_time)
+        avg_latency = int(sum(session.claude_latencies) / len(session.claude_latencies) * 1000) if session.claude_latencies else 0
+        max_latency = int(max(session.claude_latencies) * 1000) if session.claude_latencies else 0
+        logger.info(
+            "Call ended: call_sid=%s duration=%ds turns=%d record_submitted=%s "
+            "request_type=%s avg_claude_ms=%d max_claude_ms=%d",
+            session.call_sid, duration, session.turn_count,
+            session.call_record_submitted, session.request_type or "none",
+            avg_latency, max_latency,
+        )
     except Exception as e:
-        logger.error("WebSocket error (call_sid=%s): %s", session.call_sid, e)
+        duration = int(time.time() - session.start_time)
+        avg_latency = int(sum(session.claude_latencies) / len(session.claude_latencies) * 1000) if session.claude_latencies else 0
+        max_latency = int(max(session.claude_latencies) * 1000) if session.claude_latencies else 0
+        logger.error(
+            "Call error: call_sid=%s duration=%ds turns=%d record_submitted=%s "
+            "request_type=%s avg_claude_ms=%d max_claude_ms=%d error=%s",
+            session.call_sid, duration, session.turn_count,
+            session.call_record_submitted, session.request_type or "none",
+            avg_latency, max_latency, e,
+        )
 
 
 async def _handle_message(
@@ -111,7 +132,10 @@ async def _handle_message(
         )
 
         session.trim_history()
+        start = time.time()
         response = await _get_response_with_filler(ws, session)
+        session.claude_latencies.append(time.time() - start)
+        session.turn_count += 1
         session.conversation_history.append(
             ConversationTurn(role="assistant", content=response.text)
         )
@@ -130,6 +154,9 @@ async def _handle_message(
                 reason=response.transfer_reason,
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
+
+        if response.call_record:
+            session.request_type = str(response.call_record.request_type)
 
         # If Claude used the submit tool, process the call record
         if response.call_record and not session.call_record_submitted:
