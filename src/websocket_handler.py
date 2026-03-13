@@ -1,10 +1,11 @@
+import asyncio
 import json
 import logging
 import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from src.claude_service import ConversationTurn, get_claude_response
+from src.claude_service import ClaudeResponse, ConversationTurn, get_claude_response
 from src.call_processor import process_completed_call
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,32 @@ class CallSession:
         self.conversation_history = (
             self.conversation_history[:1] + self.conversation_history[-(MAX_HISTORY - 1):]
         )
+
+
+async def _get_response_with_filler(
+    ws: WebSocket,
+    session: CallSession,
+) -> ClaudeResponse:
+    """Get Claude response, sending a filler message if it takes too long."""
+    response_task = asyncio.create_task(get_claude_response(session.conversation_history))
+
+    async def _send_filler():
+        await asyncio.sleep(2.5)
+        if not response_task.done():
+            await _send_text_response(ws, "One moment please.")
+
+    filler_task = asyncio.create_task(_send_filler())
+
+    try:
+        response = await response_task
+    finally:
+        filler_task.cancel()
+        try:
+            await filler_task
+        except asyncio.CancelledError:
+            pass
+
+    return response
 
 
 async def handle_conversation_relay(ws: WebSocket) -> None:
@@ -84,7 +111,7 @@ async def _handle_message(
         )
 
         session.trim_history()
-        response = await get_claude_response(session.conversation_history)
+        response = await _get_response_with_filler(ws, session)
         session.conversation_history.append(
             ConversationTurn(role="assistant", content=response.text)
         )
