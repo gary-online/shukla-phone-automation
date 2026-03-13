@@ -5,7 +5,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.13-slim
 WORKDIR /app
-RUN useradd -r -s /bin/false appuser && mkdir -p /app/data && chown appuser:appuser /app/data
+RUN groupadd -g 1000 appuser && useradd -u 1000 -g 1000 -s /bin/false appuser \
+    && mkdir -p /app/data && chown appuser:appuser /app/data
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY src/ src/
