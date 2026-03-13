@@ -6,6 +6,7 @@ from src.types import CallRecord, CallRecordExtract
 from src.csv_service import append_call_record
 from src.google_chat_service import send_google_chat_notification
 from src.email_service import send_email_notification
+from src.error_history import record_error
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ async def process_completed_call(
     for name, result in zip(service_names, results):
         if isinstance(result, Exception):
             logger.error("Output delivery failed for %s (call_sid=%s): %s", name, call_sid, result)
+            record_error(call_sid, name.lower().replace(" ", "_"), str(result))
 
 
 async def _append_csv_safe(record: CallRecord) -> None:

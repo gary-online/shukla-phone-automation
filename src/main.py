@@ -5,7 +5,8 @@ from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from twilio.twiml.voice_response import VoiceResponse
 
-from src.config import BASE_URL, HOST, PORT, ENV
+from src.config import ADMIN_API_KEY, BASE_URL, HOST, PORT, ENV
+from src.error_history import get_recent_errors
 from src.logging_config import setup_logging
 from src.websocket_handler import handle_conversation_relay
 
@@ -49,6 +50,16 @@ async def voice_incoming(request: Request):
 async def ws_conversation(ws: WebSocket):
     """WebSocket endpoint for Twilio ConversationRelay."""
     await handle_conversation_relay(ws)
+
+
+@app.get("/errors")
+async def errors(request: Request):
+    if not ADMIN_API_KEY:
+        return Response(status_code=404)
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key != ADMIN_API_KEY:
+        return Response(status_code=401)
+    return {"errors": get_recent_errors()}
 
 
 @app.post("/voice/status")

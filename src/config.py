@@ -48,3 +48,6 @@ CSV_OUTPUT_DIR = _optional("CSV_OUTPUT_DIR", "./data")
 
 # Logging
 ENV = _optional("ENV", "development")
+
+# Admin
+ADMIN_API_KEY = _optional("ADMIN_API_KEY")
