@@ -40,5 +40,8 @@ PORT = int(_optional("PORT", "8080"))
 HOST = _optional("HOST", "0.0.0.0")
 BASE_URL = _optional("BASE_URL", "http://localhost:8080")
 
+# Claude
+CLAUDE_TIMEOUT = int(_optional("CLAUDE_TIMEOUT", "30"))
+
 # CSV
 CSV_OUTPUT_DIR = _optional("CSV_OUTPUT_DIR", "./data")

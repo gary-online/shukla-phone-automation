@@ -4,8 +4,9 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 import anthropic
+import httpx
 
-from src.config import ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_MODEL
+from src.config import ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_MODEL, CLAUDE_TIMEOUT
 from src.system_prompt import SYSTEM_PROMPT
 from src.types import CallRecordExtract, Priority, RequestType
 
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 client = anthropic.AsyncAnthropic(
     api_key=ANTHROPIC_API_KEY,
+    timeout=httpx.Timeout(CLAUDE_TIMEOUT, connect=10.0),
     **({"base_url": ANTHROPIC_BASE_URL} if ANTHROPIC_BASE_URL else {}),
 )
 
