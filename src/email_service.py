@@ -1,7 +1,10 @@
 import asyncio
 import base64
 import logging
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email import encoders
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -14,6 +17,7 @@ from src.config import (
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REFRESH_TOKEN,
 )
+from src.csv_service import _get_csv_path
 from src.retry import with_retry
 from src.types import CallRecord, Priority
 
@@ -66,10 +70,24 @@ async def send_email_notification(record: CallRecord) -> None:
     subject = f"[{priority_label}] {record.request_type} — {record.rep_name}"
     body = _build_email_body(record)
 
-    message = MIMEText(body)
+    message = MIMEMultipart()
     message["to"] = GMAIL_TO_ADDRESS
     message["from"] = GMAIL_FROM_ADDRESS
     message["subject"] = subject
+    message.attach(MIMEText(body))
+
+    # Attach the current month's CSV file if it exists
+    csv_path = _get_csv_path()
+    if csv_path.exists():
+        with open(csv_path, "rb") as f:
+            attachment = MIMEBase("text", "csv")
+            attachment.set_payload(f.read())
+            encoders.encode_base64(attachment)
+            attachment.add_header(
+                "Content-Disposition",
+                f"attachment; filename={csv_path.name}",
+            )
+            message.attach(attachment)
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
