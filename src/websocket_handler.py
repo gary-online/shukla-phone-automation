@@ -7,6 +7,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from src.claude_service import ClaudeResponse, ConversationTurn, get_claude_response
 from src.call_processor import process_completed_call
+from src.health import active_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,8 @@ async def _get_response_with_filler(
 async def handle_conversation_relay(ws: WebSocket) -> None:
     await ws.accept()
     session = CallSession()
+    session_id = id(session)
+    active_sessions.add(session_id)
     logger.info("New ConversationRelay WebSocket connection")
 
     try:
@@ -93,6 +96,8 @@ async def handle_conversation_relay(ws: WebSocket) -> None:
             session.call_record_submitted, session.request_type or "none",
             avg_latency, max_latency, e,
         )
+    finally:
+        active_sessions.discard(session_id)
 
 
 async def _handle_message(

@@ -7,6 +7,7 @@ from twilio.twiml.voice_response import VoiceResponse
 
 from src.config import ADMIN_API_KEY, BASE_URL, HOST, PORT, ENV
 from src.error_history import get_recent_errors
+from src.health import active_sessions, check_claude_api, check_csv_dir, check_gmail
 from src.logging_config import setup_logging
 from src.websocket_handler import handle_conversation_relay
 
@@ -21,7 +22,34 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 async def health():
     from datetime import datetime, timezone
 
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    claude = await check_claude_api()
+    return {
+        "status": "ok" if claude["status"] == "ok" else "degraded",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {
+            "claude_api": claude,
+            "gmail": check_gmail(),
+            "csv_dir": check_csv_dir(),
+            "active_calls": len(active_sessions),
+        },
+    }
+
+
+@app.get("/health/live")
+async def health_live():
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    claude = await check_claude_api()
+    if claude["status"] != "ok":
+        return Response(
+            content='{"status": "not ready", "reason": "claude_api unreachable"}',
+            status_code=503,
+            media_type="application/json",
+        )
+    return {"status": "ready"}
 
 
 @app.post("/voice/incoming")
