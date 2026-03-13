@@ -3,6 +3,7 @@ import logging
 import httpx
 
 from src.config import GOOGLE_CHAT_WEBHOOK_URL
+from src.retry import with_retry
 from src.types import CallRecord
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ async def send_google_chat_notification(record: CallRecord) -> None:
         ]
     }
 
-    try:
+    async def _post_chat():
         async with httpx.AsyncClient(timeout=10.0) as http_client:
             response = await http_client.post(
                 GOOGLE_CHAT_WEBHOOK_URL,
@@ -54,6 +55,9 @@ async def send_google_chat_notification(record: CallRecord) -> None:
             )
         else:
             logger.info("Google Chat notification sent (call_sid=%s)", record.call_sid)
+
+    try:
+        await with_retry(_post_chat, max_attempts=3, base_delay=1.0)
     except httpx.HTTPError as e:
         logger.error("Google Chat HTTP error (call_sid=%s): %s", record.call_sid, e)
         raise

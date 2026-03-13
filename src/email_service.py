@@ -14,6 +14,7 @@ from src.config import (
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REFRESH_TOKEN,
 )
+from src.retry import with_retry
 from src.types import CallRecord, Priority
 
 logger = logging.getLogger(__name__)
@@ -72,13 +73,17 @@ async def send_email_notification(record: CallRecord) -> None:
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
-    # Run sync Gmail API call in executor to avoid blocking the event loop
+    # Run sync Gmail API call in executor with per-attempt timeout and retry
     loop = asyncio.get_running_loop()
-    try:
-        await asyncio.wait_for(
+
+    async def _send_with_timeout():
+        return await asyncio.wait_for(
             loop.run_in_executor(None, _send_gmail_message, raw),
             timeout=15.0,
         )
+
+    try:
+        await with_retry(_send_with_timeout, max_attempts=2, base_delay=2.0)
     except TimeoutError:
         logger.error("Email send timed out (call_sid=%s)", record.call_sid)
         raise

@@ -7,6 +7,7 @@ import anthropic
 import httpx
 
 from src.config import ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_MODEL, CLAUDE_TIMEOUT
+from src.retry import with_retry
 from src.system_prompt import SYSTEM_PROMPT
 from src.types import CallRecordExtract, Priority, RequestType
 
@@ -106,23 +107,31 @@ async def get_claude_response(
     tool_id = ""
     tool_input_json = ""
 
-    async with client.messages.stream(
-        model=CLAUDE_MODEL,
-        max_tokens=300,
-        system=SYSTEM_PROMPT,
-        tools=[SUBMIT_TOOL],
-        messages=messages,
-    ) as stream:
-        async for event in stream:
-            if event.type == "content_block_start":
-                if event.content_block.type == "tool_use":
-                    tool_name = event.content_block.name
-                    tool_id = event.content_block.id
-            elif event.type == "content_block_delta":
-                if event.delta.type == "text_delta":
-                    full_text += event.delta.text
-                elif event.delta.type == "input_json_delta":
-                    tool_input_json += event.delta.partial_json
+    async def _call_claude():
+        nonlocal full_text, tool_name, tool_id, tool_input_json
+        full_text = ""
+        tool_name = ""
+        tool_id = ""
+        tool_input_json = ""
+        async with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=300,
+            system=SYSTEM_PROMPT,
+            tools=[SUBMIT_TOOL],
+            messages=messages,
+        ) as stream:
+            async for event in stream:
+                if event.type == "content_block_start":
+                    if event.content_block.type == "tool_use":
+                        tool_name = event.content_block.name
+                        tool_id = event.content_block.id
+                elif event.type == "content_block_delta":
+                    if event.delta.type == "text_delta":
+                        full_text += event.delta.text
+                    elif event.delta.type == "input_json_delta":
+                        tool_input_json += event.delta.partial_json
+
+    await with_retry(_call_claude, max_attempts=3, base_delay=1.0)
 
     call_record = None
     done = False
