@@ -94,6 +94,47 @@ async def send_email_notification(record: CallRecord) -> None:
     logger.info("Email notification sent (call_sid=%s, to=%s)", record.call_sid, GMAIL_TO_ADDRESS)
 
 
+async def send_escalation_email(
+    call_sid: str,
+    rep_name: str,
+    reason: str,
+    timestamp: str,
+) -> None:
+    if not GOOGLE_CLIENT_ID or not GOOGLE_REFRESH_TOKEN:
+        logger.warning("Gmail API not configured, skipping escalation email")
+        return
+
+    subject = f"[ESCALATION] Call from {rep_name or 'unknown'} — {reason}"
+    body = "\n".join([
+        "Call Escalation",
+        "=" * 40,
+        "",
+        f"Timestamp: {timestamp}",
+        f"Rep Name: {rep_name or 'unknown'}",
+        f"Reason: {reason}",
+        f"Call SID: {call_sid}",
+        "",
+        "A team member should follow up with this caller.",
+    ])
+
+    message = MIMEText(body)
+    message["to"] = GMAIL_TO_ADDRESS
+    message["from"] = GMAIL_FROM_ADDRESS
+    message["subject"] = subject
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+    loop = asyncio.get_running_loop()
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(None, _send_gmail_message, raw),
+            timeout=15.0,
+        )
+        logger.info("Escalation email sent (call_sid=%s, to=%s)", call_sid, GMAIL_TO_ADDRESS)
+    except Exception as e:
+        logger.error("Escalation email failed (call_sid=%s): %s", call_sid, e)
+
+
 def _send_gmail_message(raw: str) -> None:
     try:
         service = _get_gmail_service()

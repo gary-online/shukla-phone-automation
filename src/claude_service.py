@@ -84,11 +84,33 @@ class ConversationTurn:
     content: str
 
 
+TRANSFER_TOOL: anthropic.types.ToolParam = {
+    "name": "transfer_to_human",
+    "description": (
+        "Transfer the caller to a human when you cannot help, the caller "
+        "requests it, or the situation requires human judgment."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Brief reason why the transfer is needed",
+            },
+        },
+        "required": ["reason"],
+    },
+}
+
+TOOLS = [SUBMIT_TOOL, TRANSFER_TOOL]
+
+
 @dataclass
 class ClaudeResponse:
     text: str
     call_record: CallRecordExtract | None
     done: bool
+    transfer_reason: str | None = None
 
 
 async def get_claude_response(
@@ -117,7 +139,7 @@ async def get_claude_response(
             model=CLAUDE_MODEL,
             max_tokens=300,
             system=SYSTEM_PROMPT,
-            tools=[SUBMIT_TOOL],
+            tools=TOOLS,
             messages=messages,
         ) as stream:
             async for event in stream:
@@ -185,11 +207,45 @@ async def get_claude_response(
             model=CLAUDE_MODEL,
             max_tokens=200,
             system=SYSTEM_PROMPT,
-            tools=[SUBMIT_TOOL],
+            tools=TOOLS,
             messages=messages,
         ) as follow_stream:
             async for event in follow_stream:
                 if event.type == "content_block_delta" and event.delta.type == "text_delta":
                     full_text += event.delta.text
+
+    elif tool_name == "transfer_to_human" and tool_input_json:
+        try:
+            inp = json.loads(tool_input_json)
+        except json.JSONDecodeError:
+            inp = {"reason": "unknown"}
+        reason = inp.get("reason", "unknown")
+        logger.warning("Claude requested transfer to human: %s", reason)
+
+        messages.append({"role": "assistant", "content": [
+            *([{"type": "text", "text": full_text}] if full_text else []),
+            {"type": "tool_use", "id": tool_id, "name": tool_name, "input": inp},
+        ]})
+        messages.append({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_id,
+                "content": "Transfer noted. A team member will follow up.",
+            }],
+        })
+
+        async with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=100,
+            system=SYSTEM_PROMPT,
+            tools=TOOLS,
+            messages=messages,
+        ) as follow_stream:
+            async for event in follow_stream:
+                if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                    full_text += event.delta.text
+
+        return ClaudeResponse(text=full_text, call_record=None, done=True, transfer_reason=reason)
 
     return ClaudeResponse(text=full_text, call_record=call_record, done=done)

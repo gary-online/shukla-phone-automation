@@ -18,6 +18,9 @@ class CallSession:
         self.conversation_history: list[ConversationTurn] = []
         self.start_time: float = time.time()
         self.call_record_submitted: bool = False
+        self.should_close: bool = False
+        self.last_assistant_response: str = ""
+        self.escalation_sent: bool = False
 
     def trim_history(self) -> None:
         """Keep first turn + last (MAX_HISTORY - 1) turns to stay within limits."""
@@ -34,7 +37,7 @@ async def handle_conversation_relay(ws: WebSocket) -> None:
     logger.info("New ConversationRelay WebSocket connection")
 
     try:
-        while True:
+        while not session.should_close:
             data = await ws.receive_text()
             message = json.loads(data)
             await _handle_message(ws, session, message)
@@ -67,6 +70,7 @@ async def _handle_message(
         )
 
         await _send_text_response(ws, greeting.text)
+        session.last_assistant_response = greeting.text
 
     elif msg_type == "prompt":
         caller_speech = message.get("voicePrompt", "")
@@ -86,6 +90,19 @@ async def _handle_message(
         )
 
         await _send_text_response(ws, response.text)
+        session.last_assistant_response = response.text
+
+        if response.transfer_reason and not session.escalation_sent:
+            session.escalation_sent = True
+            session.should_close = True
+            from src.email_service import send_escalation_email
+            from datetime import datetime, timezone
+            await send_escalation_email(
+                call_sid=session.call_sid,
+                rep_name="",
+                reason=response.transfer_reason,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
 
         # If Claude used the submit tool, process the call record
         if response.call_record and not session.call_record_submitted:
