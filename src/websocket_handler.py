@@ -9,6 +9,8 @@ from src.call_processor import process_completed_call
 
 logger = logging.getLogger(__name__)
 
+MAX_HISTORY = 20
+
 
 class CallSession:
     def __init__(self):
@@ -16,6 +18,14 @@ class CallSession:
         self.conversation_history: list[ConversationTurn] = []
         self.start_time: float = time.time()
         self.call_record_submitted: bool = False
+
+    def trim_history(self) -> None:
+        """Keep first turn + last (MAX_HISTORY - 1) turns to stay within limits."""
+        if len(self.conversation_history) <= MAX_HISTORY:
+            return
+        self.conversation_history = (
+            self.conversation_history[:1] + self.conversation_history[-(MAX_HISTORY - 1):]
+        )
 
 
 async def handle_conversation_relay(ws: WebSocket) -> None:
@@ -50,6 +60,7 @@ async def _handle_message(
             ConversationTurn(role="user", content="[Call connected. The caller just dialed in. Greet them.]")
         )
 
+        session.trim_history()
         greeting = await get_claude_response(session.conversation_history)
         session.conversation_history.append(
             ConversationTurn(role="assistant", content=greeting.text)
@@ -68,6 +79,7 @@ async def _handle_message(
             ConversationTurn(role="user", content=caller_speech)
         )
 
+        session.trim_history()
         response = await get_claude_response(session.conversation_history)
         session.conversation_history.append(
             ConversationTurn(role="assistant", content=response.text)
