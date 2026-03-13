@@ -74,11 +74,25 @@ async def send_email_notification(record: CallRecord) -> None:
 
     # Run sync Gmail API call in executor to avoid blocking the event loop
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _send_gmail_message, raw)
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(None, _send_gmail_message, raw),
+            timeout=15.0,
+        )
+    except TimeoutError:
+        logger.error("Email send timed out (call_sid=%s)", record.call_sid)
+        raise
+    except Exception as e:
+        logger.error("Email send failed (call_sid=%s): %s", record.call_sid, e)
+        raise
 
     logger.info("Email notification sent (call_sid=%s, to=%s)", record.call_sid, GMAIL_TO_ADDRESS)
 
 
 def _send_gmail_message(raw: str) -> None:
-    service = _get_gmail_service()
-    service.users().messages().send(userId="me", body={"raw": raw}).execute()
+    try:
+        service = _get_gmail_service()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+    except Exception as e:
+        logger.error("Gmail API error: %s", e)
+        raise
