@@ -4,8 +4,9 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from src.claude_service import ConversationTurn, get_claude_response
+from src.claude_service import ConversationTurn, stream_claude_response
 from src.call_processor import process_completed_call
+from src.types import CallRecordExtract
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +51,10 @@ async def _handle_message(
             ConversationTurn(role="user", content="[Call connected. The caller just dialed in. Greet them.]")
         )
 
-        greeting = await get_claude_response(session.conversation_history)
+        full_text, call_record = await _stream_response(ws, session)
         session.conversation_history.append(
-            ConversationTurn(role="assistant", content=greeting.text)
+            ConversationTurn(role="assistant", content=full_text)
         )
-
-        await _send_text_response(ws, greeting.text)
 
     elif msg_type == "prompt":
         caller_speech = message.get("voicePrompt", "")
@@ -68,18 +67,16 @@ async def _handle_message(
             ConversationTurn(role="user", content=caller_speech)
         )
 
-        response = await get_claude_response(session.conversation_history)
+        full_text, call_record = await _stream_response(ws, session)
         session.conversation_history.append(
-            ConversationTurn(role="assistant", content=response.text)
+            ConversationTurn(role="assistant", content=full_text)
         )
 
-        await _send_text_response(ws, response.text)
-
         # If Claude used the submit tool, process the call record
-        if response.call_record and not session.call_record_submitted:
+        if call_record and not session.call_record_submitted:
             session.call_record_submitted = True
             duration = int(time.time() - session.start_time)
-            await process_completed_call(session.call_sid, response.call_record, duration)
+            await process_completed_call(session.call_sid, call_record, duration)
 
     elif msg_type == "interrupt":
         logger.debug("Caller interrupted (call_sid=%s)", session.call_sid)
@@ -94,7 +91,34 @@ async def _handle_message(
         logger.warning("Unknown message type (call_sid=%s): %s", session.call_sid, msg_type)
 
 
-async def _send_text_response(ws: WebSocket, text: str) -> None:
-    await ws.send_text(
-        json.dumps({"type": "text", "token": text, "last": True})
-    )
+async def _stream_response(
+    ws: WebSocket,
+    session: CallSession,
+) -> tuple[str, CallRecordExtract | None]:
+    """Stream Claude's response to the caller via ConversationRelay tokens.
+
+    Returns the full text and optional call record.
+    """
+    full_text = ""
+    call_record = None
+
+    async for chunk in stream_claude_response(session.conversation_history):
+        if isinstance(chunk, CallRecordExtract):
+            call_record = chunk
+        elif isinstance(chunk, str):
+            full_text += chunk
+            # Send each sentence as a token with last=False so TTS starts immediately
+            await ws.send_text(json.dumps({
+                "type": "text",
+                "token": chunk,
+                "last": False,
+            }))
+
+    # Send final empty token with last=True to signal end of response
+    await ws.send_text(json.dumps({
+        "type": "text",
+        "token": "",
+        "last": True,
+    }))
+
+    return full_text, call_record

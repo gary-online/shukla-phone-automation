@@ -1,7 +1,8 @@
 import logging
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from twilio.twiml.voice_response import VoiceResponse
 
 from src.config import BASE_URL, HOST, PORT
@@ -14,6 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Shukla Surgical Support - AI Phone Service")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.get("/health")
@@ -46,7 +48,7 @@ async def voice_incoming(request: Request):
 
 
 @app.websocket("/ws/conversation")
-async def ws_conversation(ws):
+async def ws_conversation(ws: WebSocket):
     """WebSocket endpoint for Twilio ConversationRelay."""
     await handle_conversation_relay(ws)
 
