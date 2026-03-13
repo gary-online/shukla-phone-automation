@@ -45,3 +45,6 @@ CLAUDE_TIMEOUT = int(_optional("CLAUDE_TIMEOUT", "30"))
 
 # CSV
 CSV_OUTPUT_DIR = _optional("CSV_OUTPUT_DIR", "./data")
+
+# Logging
+ENV = _optional("ENV", "development")

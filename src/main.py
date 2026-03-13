@@ -5,13 +5,11 @@ from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from twilio.twiml.voice_response import VoiceResponse
 
-from src.config import BASE_URL, HOST, PORT
+from src.config import BASE_URL, HOST, PORT, ENV
+from src.logging_config import setup_logging
 from src.websocket_handler import handle_conversation_relay
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+setup_logging(ENV)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Shukla Surgical Support - AI Phone Service")
