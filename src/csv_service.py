@@ -31,15 +31,19 @@ def _get_csv_path() -> Path:
 
 def append_call_record(record: CallRecord) -> None:
     csv_path = _get_csv_path()
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    file_exists = csv_path.exists()
+    try:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        file_exists = csv_path.exists()
 
-    with open(csv_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_HEADERS, quoting=csv.QUOTE_ALL)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(
-            {h: getattr(record, h, "") for h in CSV_HEADERS}
-        )
+        with open(csv_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_HEADERS, quoting=csv.QUOTE_ALL)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(
+                {h: getattr(record, h, "") for h in CSV_HEADERS}
+            )
 
-    logger.info("Appended call record to CSV: %s (call_sid=%s)", csv_path, record.call_sid)
+        logger.info("Appended call record to CSV: %s (call_sid=%s)", csv_path, record.call_sid)
+    except OSError as e:
+        logger.error("Failed to write CSV (call_sid=%s): %s", record.call_sid, e)
+        raise
