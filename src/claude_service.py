@@ -129,17 +129,31 @@ async def get_claude_response(
 
     # Handle tool use (submit_call_record)
     if tool_name == "submit_call_record" and tool_input_json:
-        inp = json.loads(tool_input_json)
-        call_record = CallRecordExtract(
-            rep_name=inp.get("rep_name", ""),
-            request_type=RequestType(inp.get("request_type", "Other")),
-            tray_type=inp.get("tray_type", ""),
-            surgeon=inp.get("surgeon", ""),
-            facility=inp.get("facility", ""),
-            surgery_date=inp.get("surgery_date", ""),
-            details=inp.get("details", ""),
-            priority=Priority(inp.get("priority", "normal")),
-        )
+        try:
+            inp = json.loads(tool_input_json)
+        except json.JSONDecodeError:
+            logger.error("Malformed tool input JSON: %s", tool_input_json)
+            return ClaudeResponse(text=full_text, call_record=None, done=False)
+
+        if not inp.get("rep_name", "").strip():
+            logger.error("Empty rep_name in tool input")
+            return ClaudeResponse(text=full_text, call_record=None, done=False)
+
+        try:
+            call_record = CallRecordExtract(
+                rep_name=inp.get("rep_name", ""),
+                request_type=RequestType(inp.get("request_type", "Other")),
+                tray_type=inp.get("tray_type", ""),
+                surgeon=inp.get("surgeon", ""),
+                facility=inp.get("facility", ""),
+                surgery_date=inp.get("surgery_date", ""),
+                details=inp.get("details", ""),
+                priority=Priority(inp.get("priority", "normal")),
+            )
+        except (ValueError, KeyError) as e:
+            logger.error("Invalid tool input values: %s", e)
+            return ClaudeResponse(text=full_text, call_record=None, done=False)
+
         done = True
         logger.info("Claude submitted call record via tool use: %s", call_record)
 
