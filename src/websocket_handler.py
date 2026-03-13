@@ -114,7 +114,28 @@ async def _handle_message(
         logger.debug("Caller interrupted (call_sid=%s)", session.call_sid)
 
     elif msg_type == "dtmf":
-        logger.debug("DTMF received (call_sid=%s): %s", session.call_sid, message.get("digit"))
+        digit = message.get("digit", "")
+        logger.info("DTMF received (call_sid=%s): %s", session.call_sid, digit)
+
+        if digit == "0":
+            session.should_close = True
+            await _send_text_response(
+                ws,
+                "I'm going to have one of our team members follow up with you directly. Thank you for calling.",
+            )
+            if not session.escalation_sent:
+                session.escalation_sent = True
+                from src.email_service import send_escalation_email
+                from datetime import datetime, timezone
+                await send_escalation_email(
+                    call_sid=session.call_sid,
+                    rep_name="",
+                    reason="Caller pressed 0 to speak with a human",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+        elif digit == "*":
+            text = session.last_assistant_response or "I haven't said anything yet."
+            await _send_text_response(ws, text)
 
     elif msg_type == "error":
         logger.error("ConversationRelay error (call_sid=%s): %s", session.call_sid, message)
