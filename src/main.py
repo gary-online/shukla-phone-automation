@@ -31,6 +31,31 @@ async def on_startup():
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, lambda: _shutdown_event.set())
 
+    # Validate required services
+    logger.info("Validating services...")
+
+    claude_check = await check_claude_api()
+    if claude_check["status"] != "ok":
+        logger.error("Claude API check failed: %s", claude_check["status"])
+        # Don't crash — might be a temporary issue, let health checks report it
+        logger.warning("Starting with degraded Claude API — calls may fail")
+    else:
+        logger.info("Claude API: OK (latency=%dms)", claude_check["latency_ms"])
+
+    gmail_check = check_gmail()
+    if gmail_check["status"] == "configured":
+        logger.info("Gmail API: configured")
+    else:
+        logger.info("Gmail API: not configured (email notifications disabled)")
+
+    csv_check = check_csv_dir()
+    if csv_check.get("writable"):
+        logger.info("CSV directory: writable")
+    else:
+        logger.warning("CSV directory: %s", csv_check["status"])
+
+    logger.info("Startup validation complete")
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
