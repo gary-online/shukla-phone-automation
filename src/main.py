@@ -112,13 +112,20 @@ async def health_ready():
 
 
 async def _validate_twilio(request: Request) -> None:
-    """Validate that the request comes from Twilio using signature verification."""
+    """Validate that the request comes from Twilio using signature verification.
+
+    In production (ENV=production), invalid signatures are rejected with 403.
+    In development, invalid signatures are logged as warnings but allowed through,
+    because ngrok URL rewriting causes legitimate signature mismatches.
+    """
     signature = request.headers.get("X-Twilio-Signature", "")
     url = str(request.url)
     body = dict(await request.form())
     if not _twilio_validator.validate(url, body, signature):
-        logger.warning("Invalid Twilio signature for %s", url)
-        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+        if ENV == "production":
+            logger.warning("Invalid Twilio signature for %s", url)
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+        logger.debug("Twilio signature mismatch (expected in dev with ngrok)")
 
 
 @app.post("/voice/incoming")
